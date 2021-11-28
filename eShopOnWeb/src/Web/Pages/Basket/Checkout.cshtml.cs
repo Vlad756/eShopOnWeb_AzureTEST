@@ -50,20 +50,6 @@ namespace Microsoft.eShopWeb.Web.Pages.Basket
             await SetBasketModelAsync();
         }
 
-        public async Task UploadOrderToBlob(IEnumerable<BasketItemViewModel> items)
-        {
-            //BlobConnectionString
-            const string connectionString = "Endpoint=sb://eshopfinalservicebus.servicebus.windows.net/;SharedAccessKeyName=User;SharedAccessKey=wdqgsGY+p9oXqLvHUKG9kCE1QmskYFOCNAGfHdXsmok=";
-            const string queueName = "orders";
-
-            var queueClient = new QueueClient(connectionString, queueName);
-            var order = JsonConvert.SerializeObject(items);
-            var message = new Message(Encoding.UTF8.GetBytes(order));
-
-            await queueClient.SendAsync(message);
-            await queueClient.CloseAsync();
-        }
-
         public async Task<IActionResult> OnPost(IEnumerable<BasketItemViewModel> items)
         {
             try
@@ -77,14 +63,8 @@ namespace Microsoft.eShopWeb.Web.Pages.Basket
 
                 var updateModel = items.ToDictionary(b => b.Id.ToString(), b => b.Quantity);
                 await _basketService.SetQuantities(BasketModel.Id, updateModel);
-
-                await UploadOrderToBlob(items);
-
                 await _orderService.CreateOrderAsync(BasketModel.Id, new Address("123 Main St.", "Kent", "OH", "United States", "44240"));
                 await _basketService.DeleteBasketAsync(BasketModel.Id);
-
-                //using var httpclient = new HttpClient();
-                //await httpclient.GetAsync(@"https://delveryorderprocessor.azurewebsites.net/api/DelveryOrderProcessor?code=Xy61hT0y7dXRTD7ZTE9AaRSBru2TFXUaTaetGcEMyHraWf4rvsFBoQ==");
             }
             catch (EmptyBasketOnCheckoutException emptyBasketOnCheckoutException)
             {

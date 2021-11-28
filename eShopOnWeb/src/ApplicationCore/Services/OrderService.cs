@@ -1,15 +1,16 @@
-﻿using Ardalis.GuardClauses;
+﻿using System.Linq;
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Text;
+using System.Threading.Tasks;
+using Ardalis.GuardClauses;
+using Microsoft.Azure.ServiceBus;
 using Microsoft.eShopWeb.ApplicationCore.Entities;
 using Microsoft.eShopWeb.ApplicationCore.Entities.BasketAggregate;
 using Microsoft.eShopWeb.ApplicationCore.Entities.OrderAggregate;
 using Microsoft.eShopWeb.ApplicationCore.Interfaces;
 using Microsoft.eShopWeb.ApplicationCore.Specifications;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net.Http;
-using System.Text;
-using System.Threading.Tasks;
-
+using Microsoft.Extensions.Configuration;
 namespace Microsoft.eShopWeb.ApplicationCore.Services
 {
     public class OrderService : IOrderService
@@ -18,16 +19,19 @@ namespace Microsoft.eShopWeb.ApplicationCore.Services
         private readonly IUriComposer _uriComposer;
         private readonly IAsyncRepository<Basket> _basketRepository;
         private readonly IAsyncRepository<CatalogItem> _itemRepository;
+        private readonly IConfiguration _configuration;
 
         public OrderService(IAsyncRepository<Basket> basketRepository,
             IAsyncRepository<CatalogItem> itemRepository,
             IAsyncRepository<Order> orderRepository,
-            IUriComposer uriComposer)
+            IUriComposer uriComposer,
+            IConfiguration configuration)
         {
             _orderRepository = orderRepository;
             _uriComposer = uriComposer;
             _basketRepository = basketRepository;
             _itemRepository = itemRepository;
+            _configuration = configuration;
         }
 
         public async Task CreateOrderAsync(int basketId, Address shippingAddress)
@@ -52,26 +56,31 @@ namespace Microsoft.eShopWeb.ApplicationCore.Services
             var order = new Order(basket.BuyerId, shippingAddress, items);
 
             await _orderRepository.AddAsync(order);
+            await SendOrderToCosmomDbFunc(order);
+            await SendOrderToServiceBus(order);
+        }
 
+        public async Task SendOrderToServiceBus(Order order)
+        {
+            var connectionString = _configuration["ServiceBusConnectionString"];
+            const string queueName = "orders";
+
+            var queueClient = new QueueClient(connectionString, queueName);
+            var jsonOrder = Newtonsoft.Json.JsonConvert.SerializeObject(order);
+            var message = new Message(Encoding.UTF8.GetBytes(jsonOrder));
+
+            await queueClient.SendAsync(message);
+            await queueClient.CloseAsync();
+        }
+
+        public async Task SendOrderToCosmomDbFunc(Order order)
+        {
+            var url = _configuration["CosmosDbFuncUrl"];
             using var httpclient = new HttpClient();
 
-            var sb = new StringBuilder();
-            foreach (var item in order.OrderItems)
-            {
-                sb
-                    .Append(item.ItemOrdered.ProductName)
-                    .Append(", ");
-            }
+            var content = JsonContent.Create(order);
 
-            var content = new FormUrlEncodedContent(new[]
-            {
-                new KeyValuePair<string, string>("BuyerId", order.BuyerId.ToString()),
-                new KeyValuePair<string, string>("OrderDate", order.OrderDate.ToString()),
-                new KeyValuePair<string, string>("ShipToAddress", $"{order.ShipToAddress.Country}, {order.ShipToAddress.City}, {order.ShipToAddress.State}, {order.ShipToAddress.Street}, {order.ShipToAddress.ZipCode}"),
-                new KeyValuePair<string, string>("OrderItems", sb.ToString())
-            });
-
-            await httpclient.PostAsync(@"https://delveryorderprocessor.azurewebsites.net/api/DelveryOrderProcessor?code=Xy61hT0y7dXRTD7ZTE9AaRSBru2TFXUaTaetGcEMyHraWf4rvsFBoQ==", content);
+            await httpclient.PostAsync(url, content);
         }
     }
 }

@@ -15,40 +15,22 @@ namespace CosmosOrder
 {
     public static class DelveryOrderProcessor
     {
-        public class Order
-        {
-            [JsonProperty(PropertyName = "id")]
-            public string Id { get; set; }
-            [JsonProperty(PropertyName = "partitionKey")]
-            public string PartitionKey { get; set; }
-            public IFormCollection Details { get; set; }
-            public override string ToString()
-            {
-                return JsonConvert.SerializeObject(this);
-            }
-        }
-
         [FunctionName("DelveryOrderProcessor")]
-        public static async Task<IActionResult> Run(
-            [HttpTrigger(AuthorizationLevel.Function, "get", "post", Route = null)] HttpRequest req,
-            ILogger log)
+        public static IActionResult Run(
+        [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] HttpRequest req,
+        [CosmosDB(
+                databaseName: "Shop",
+                collectionName: "Orders",
+                ConnectionStringSetting = "ConnectionStrings:CosmosDBConnectionString",
+                CreateIfNotExists = true)] out dynamic collector,
+        ILogger log)
         {
-            var conn = "A3JrWZ17p7cN0pPuA7JTlVVZsDpJoFl7kYooM8nA0e9YRVXwFPfDTguB6xj50tZC7boQYBFKeIN5Ivyktg9M3A==";
+            var order = req.ReadAsStringAsync().Result;
+            var document = new { Description = order, id = Guid.NewGuid() };
 
-            CosmosClient cosmosClient = new CosmosClient(@"https://eshopcosmosfinal.documents.azure.com:443/", conn, new CosmosClientOptions() { ApplicationName = "CosmosDBDotnetQuickstart" });
+            collector = document;
 
-            Database database = await cosmosClient.CreateDatabaseIfNotExistsAsync("Shop");
-            Container container = await database.CreateContainerIfNotExistsAsync("Orders", "/partitionKey");
-
-            var order = new Order
-            {
-                Id = Guid.NewGuid().ToString(),
-                Details = req.Form
-            };
-
-            ItemResponse<Order> andersenFamilyResponse = await container.CreateItemAsync(order, new PartitionKey(order.PartitionKey));
-
-            return new OkObjectResult(andersenFamilyResponse);
+            return new OkObjectResult("ok");
         }
     }
 }
